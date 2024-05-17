@@ -1,6 +1,6 @@
 {
   "name": "@rbxts/transact",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "out/init.lua",
   "scripts": {
@@ -10,9 +10,13 @@
     "serve": "rojo serve test/default.project.json",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "Transaction",
+    "roblox-ts"
+  ],
+  "repository": "https://github.com/Tesmi-Develop/transaction",
+  "author": "tesmi",
+  "license": "MIT",
   "types": "out/index.d.ts",
   "files": [
     "out",
