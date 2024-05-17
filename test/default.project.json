@@ -1,5 +1,5 @@
 {
-	"name": "test-tycoon-library",
+	"name": "transact-test",
 	"globIgnorePaths": ["**/package.json", "**/tsconfig.json"],
 	"tree": {
 		"$className": "DataModel",

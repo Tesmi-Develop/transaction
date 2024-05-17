@@ -1,5 +1,5 @@
 {
-  "name": "@rbxts/package-name",
+  "name": "@rbxts/transact",
   "version": "0.0.1",
   "description": "",
   "main": "out/init.lua",
@@ -36,6 +36,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "@rbxts/signal": "^1.1.1",
     "@rbxts/testez": "^0.4.2-ts.0"
   }
 }
