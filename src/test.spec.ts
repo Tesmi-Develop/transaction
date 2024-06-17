@@ -11,13 +11,23 @@ class TestEntity implements ITransactEntity {
 		Rollback: false,
 		End: false,
 	};
-	public Action: "Complete" | "Rollback" | "Fail" = "Complete";
+	public Action: "Complete" | "Rollback" | "Fail" | "TransactionChain" = "Complete";
 
 	public Init() {
 		this.statuses.Init = true;
 	}
 
 	public async Transact() {
+		if (this.Action === "TransactionChain") {
+			return {
+				repeats: 1,
+				callback: async () => {
+					return async () => {
+						this.statuses.Transact = true;
+					};
+				},
+			};
+		}
 		if (this.Action === "Rollback") {
 			error("Transaction failed");
 		}
@@ -85,5 +95,22 @@ export = () => {
 		expect(entities[1].statuses.Rollback).to.equal(true);
 
 		expect(result.StatusCodes).to.equal(TransactionStatusCode.RollbackFail);
+	});
+
+	it("Should complete transaction chain", () => {
+		const entities = [new TestEntity(), new TestEntity()];
+		const transaction = new Transaction(entities);
+		const result = transaction.Transact().expect();
+
+		expect(entities[0].statuses.Init).to.equal(true);
+		expect(entities[0].statuses.Transact).to.equal(true);
+		expect(entities[0].statuses.Rollback).to.equal(false);
+		expect(entities[0].statuses.End).to.equal(true);
+
+		expect(entities[1].statuses.Init).to.equal(true);
+		expect(entities[1].statuses.Transact).to.equal(true);
+		expect(entities[1].statuses.Rollback).to.equal(false);
+		expect(entities[1].statuses.End).to.equal(true);
+		expect(result.StatusCodes).to.equal(TransactionStatusCode.Success);
 	});
 };

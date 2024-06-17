@@ -1,9 +1,11 @@
 import Signal from "@rbxts/signal";
 
+type RepeatingCallback = () => Promise<void | RepeatingCallback | { repeats: number; callback: RepeatingCallback }>;
+
 export interface ITransactEntity {
 	Init(): void;
-	Transact(): Promise<void>;
-	Rollback(): Promise<void>;
+	Transact(): ReturnType<RepeatingCallback>;
+	Rollback(): ReturnType<RepeatingCallback>;
 	End(): void;
 }
 
@@ -70,33 +72,41 @@ export class Transaction {
 		this.entities.forEach((entity) => entity.End());
 	}
 
-	private async startTransact(entity: ITransactEntity) {
-		for (const i of $range(1, math.max(this.config.TransactionRepeats, 1))) {
-			const [success] = entity.Transact().await();
-			if (success) return;
+	private async processAction(entity: ITransactEntity, action: "Transact" | "Rollback") {
+		let callback: RepeatingCallback | undefined =
+			action === "Transact" ? () => entity.Transact() : () => entity.Rollback();
+		let countRepeats = action === "Transact" ? this.config.TransactionRepeats : this.config.RollbackRepeats;
+		let flag = false;
 
-			task.wait(this.config.RetryRate);
+		while (callback) {
+			for (const i of $range(1, math.max(countRepeats, 1))) {
+				const [success, actionCallback] = callback!().await();
+				if (!success) {
+					task.wait(this.config.RetryRate);
+					continue;
+				}
+
+				flag = true;
+				if (actionCallback === undefined) return;
+
+				countRepeats = typeIs(actionCallback, "function")
+					? this.config.TransactionRepeats
+					: actionCallback.repeats;
+				callback = typeIs(actionCallback, "function") ? actionCallback : actionCallback.callback;
+				break;
+			}
+
+			if (!flag) break;
 		}
 
-		error("Transaction failed");
-	}
-
-	private async startRollback(entity: ITransactEntity) {
-		for (const i of $range(1, math.max(this.config.TransactionRepeats, 1))) {
-			const [success] = entity.Rollback().await();
-			if (success) return;
-
-			task.wait(this.config.RetryRate);
-		}
-
-		error("Rollback failed");
+		error("Action failed");
 	}
 
 	private async processTransaction() {
 		const completeTransactions: ITransactEntity[] = [];
 
 		for (const entity of this.entities) {
-			const [success] = this.startTransact(entity).await();
+			const [success] = this.processAction(entity, "Transact").await();
 			completeTransactions.push(entity);
 
 			if (!success) return [false, completeTransactions] as const;
@@ -109,7 +119,7 @@ export class Transaction {
 		let success = true;
 
 		for (const entity of entities) {
-			const [successRollback] = this.startRollback(entity).await();
+			const [successRollback] = this.processAction(entity, "Rollback").await();
 			if (!successRollback && success) success = false;
 		}
 
