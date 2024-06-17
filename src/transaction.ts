@@ -76,9 +76,10 @@ export class Transaction {
 		let callback: RepeatingCallback | undefined =
 			action === "Transact" ? () => entity.Transact() : () => entity.Rollback();
 		let countRepeats = action === "Transact" ? this.config.TransactionRepeats : this.config.RollbackRepeats;
-		let flag = false;
 
 		while (callback) {
+			let flag = false;
+
 			for (const i of $range(1, math.max(countRepeats, 1))) {
 				const [success, actionCallback] = callback!().await();
 				if (!success) {
