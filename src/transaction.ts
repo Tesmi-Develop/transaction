@@ -15,11 +15,14 @@ export interface ITransactionConfig {
 	RetryRate: number;
 }
 
-export interface ITransactionReport {
-	Success: boolean;
-	StatusCodes: TransactionStatusCode;
-}
-
+type ITransactionReport<T extends TransactionStatusCode> = T extends TransactionStatusCode.Success
+	? {
+			StatusCodes: T;
+		}
+	: {
+			StatusCodes: T;
+			Message: string;
+		};
 const DEFAULT_CONFIG: ITransactionConfig = {
 	TransactionRepeats: 5,
 	RollbackRepeats: 5,
@@ -34,22 +37,36 @@ export enum TransactionStatusCode {
 	RollbackFail = "RollbackFail",
 }
 
-const DoSuccessReport = (): ITransactionReport => ({
-	Success: true,
-	StatusCodes: TransactionStatusCode.Success,
-});
+const DoSuccessReport = () =>
+	({
+		StatusCode: TransactionStatusCode.Success,
+	}) as TransactionReport;
 
-const DoFailReport = (statusCodes: TransactionStatusCode): ITransactionReport => ({
-	Success: false,
-	StatusCodes: statusCodes,
-});
+const DoFailReport = <T extends TransactionStatusCode.TransactionFail | TransactionStatusCode.RollbackFail>(
+	statusCodes: T,
+	message: string,
+) =>
+	({
+		StatusCode: statusCodes,
+		Message: message,
+	}) as TransactionReport;
+
+export type TransactionReport =
+	| { StatusCode: TransactionStatusCode.Success }
+	| { StatusCode: TransactionStatusCode.TransactionFail; Message: string }
+	| { StatusCode: TransactionStatusCode.RollbackFail; Message: string };
+
+export type TransactionFailReport = {
+	StatusCode: TransactionStatusCode.TransactionFail | TransactionStatusCode.RollbackFail;
+	Message: string;
+};
 
 export class Transaction {
-	public readonly Ended = new Signal<(report: ITransactionReport) => void>();
+	public readonly Ended = new Signal<(report: TransactionReport) => void>();
 	private config: ITransactionConfig;
 	private entities: ITransactEntity[] = [];
 	private state: States = "Waiting";
-	private transactionPromise: Promise<ITransactionReport> | undefined;
+	private transactionPromise: Promise<TransactionReport> | undefined;
 
 	constructor(entities: ITransactEntity[], config?: Partial<ITransactionConfig>) {
 		this.entities = entities;
@@ -76,6 +93,7 @@ export class Transaction {
 		let callback: RepeatingCallback | undefined =
 			action === "Transact" ? () => entity.Transact() : () => entity.Rollback();
 		let countRepeats = action === "Transact" ? this.config.TransactionRepeats : this.config.RollbackRepeats;
+		let message: unknown = "Action failed";
 
 		while (callback) {
 			let flag = false;
@@ -84,6 +102,7 @@ export class Transaction {
 				const [success, actionCallback] = callback!().await();
 				if (!success) {
 					task.wait(this.config.RetryRate);
+					message = actionCallback; // write error
 					continue;
 				}
 
@@ -100,17 +119,17 @@ export class Transaction {
 			if (!flag) break;
 		}
 
-		error("Action failed");
+		error(message);
 	}
 
 	private async processTransaction() {
 		const completeTransactions: ITransactEntity[] = [];
 
 		for (const entity of this.entities) {
-			const [success] = this.processAction(entity, "Transact").await();
+			const [success, message] = this.processAction(entity, "Transact").await();
 			completeTransactions.push(entity);
 
-			if (!success) return [false, completeTransactions] as const;
+			if (!success) return [false, completeTransactions, message] as const;
 		}
 
 		return [true, completeTransactions] as const;
@@ -118,13 +137,18 @@ export class Transaction {
 
 	private async processRollback(entities: ITransactEntity[]) {
 		let success = true;
+		let message: unknown = "Rollback failed";
 
 		for (const entity of entities) {
-			const [successRollback] = this.processAction(entity, "Rollback").await();
-			if (!successRollback && success) success = false;
+			const [successRollback, returned] = this.processAction(entity, "Rollback").await();
+
+			if (!successRollback && success) {
+				message = returned;
+				success = false;
+			}
 		}
 
-		return success;
+		return [success, message];
 	}
 
 	private async transact() {
@@ -132,22 +156,26 @@ export class Transaction {
 		this.initEntities();
 
 		let code = TransactionStatusCode.Success;
-		const [success, completeTransactions] = await this.processTransaction();
+		const [success, completeTransactions, message] = await this.processTransaction();
+		let finalMessage = message;
 
 		if (!success && this.isState("Transact")) {
 			code = TransactionStatusCode.TransactionFail;
 
 			this.setState("Rollback");
-			const successRollback = this.processRollback(completeTransactions).expect();
+			const [successRollback, returned] = this.processRollback(completeTransactions).expect();
 
-			!successRollback && (code = TransactionStatusCode.RollbackFail);
+			if (!successRollback) {
+				code = TransactionStatusCode.RollbackFail;
+				finalMessage = returned;
+			}
 		}
 
 		this.endTransact();
 		this.transactionPromise = undefined;
 		this.setState("Waiting");
 
-		const report = success ? DoSuccessReport() : DoFailReport(code);
+		const report = success ? DoSuccessReport() : DoFailReport(code as never, finalMessage as string);
 		this.Ended.Fire(report);
 
 		return report;

@@ -1,6 +1,6 @@
 /// <reference types="@rbxts/testez/globals" />
 
-import { ITransactEntity, Transaction, TransactionStatusCode } from ".";
+import { ITransactEntity, Transaction, TransactionFailReport, TransactionStatusCode } from ".";
 
 type Statuses = "Init" | "Transact" | "Rollback" | "End";
 
@@ -29,14 +29,14 @@ class TestEntity implements ITransactEntity {
 			};
 		}
 		if (this.Action === "Rollback") {
-			error("Transaction failed");
+			error("Transaction failed1");
 		}
 		this.statuses.Transact = true;
 	}
 
 	public async Rollback() {
 		if (this.Action === "Fail") {
-			error("Rollback failed");
+			error("Rollback failed1");
 		}
 		this.statuses.Rollback = true;
 	}
@@ -61,14 +61,14 @@ export = () => {
 		expect(entities[1].statuses.Transact).to.equal(true);
 		expect(entities[1].statuses.Rollback).to.equal(false);
 		expect(entities[1].statuses.End).to.equal(true);
-		expect(result.StatusCodes).to.equal(TransactionStatusCode.Success);
+		expect(result.StatusCode).to.equal(TransactionStatusCode.Success);
 	});
 
 	it("Should rollback transact", () => {
 		const entities = [new TestEntity(), new TestEntity()];
 		entities[0].Action = "Rollback";
 		const transaction = new Transaction(entities, { RetryRate: 0.1 });
-		const result = transaction.Transact().expect();
+		const result = transaction.Transact().expect() as TransactionFailReport;
 
 		expect(entities[0].statuses.Rollback).to.equal(true);
 		expect(entities[1].statuses.Rollback).to.equal(false);
@@ -81,7 +81,9 @@ export = () => {
 
 		expect(entities[0].statuses.Rollback).to.equal(true);
 		expect(entities[1].statuses.Rollback).to.equal(true);
-		expect(result.StatusCodes).to.equal(TransactionStatusCode.TransactionFail);
+		expect(result.StatusCode).to.equal(TransactionStatusCode.TransactionFail);
+		expect(result.Message).never.equal(undefined);
+		print(result.Message);
 	});
 
 	it("Should fail rollback transact", () => {
@@ -89,12 +91,14 @@ export = () => {
 		entities[0].Action = "Fail";
 		entities[1].Action = "Rollback";
 		const transaction = new Transaction(entities, { RetryRate: 0.1 });
-		const result = transaction.Transact().expect();
+		const result = transaction.Transact().expect() as TransactionFailReport;
 
 		expect(entities[0].statuses.Rollback).to.equal(false);
 		expect(entities[1].statuses.Rollback).to.equal(true);
 
-		expect(result.StatusCodes).to.equal(TransactionStatusCode.RollbackFail);
+		expect(result.StatusCode).to.equal(TransactionStatusCode.RollbackFail);
+		expect(result.Message).never.equal(undefined);
+		print(result.Message);
 	});
 
 	it("Should complete transaction chain", () => {
@@ -111,6 +115,6 @@ export = () => {
 		expect(entities[1].statuses.Transact).to.equal(true);
 		expect(entities[1].statuses.Rollback).to.equal(false);
 		expect(entities[1].statuses.End).to.equal(true);
-		expect(result.StatusCodes).to.equal(TransactionStatusCode.Success);
+		expect(result.StatusCode).to.equal(TransactionStatusCode.Success);
 	});
 };
